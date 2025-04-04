@@ -51,6 +51,7 @@
           <category-tree 
             :categories="filteredWbCategories" 
             platformType="wb"
+            :searchQuery="wbSearchQuery"
             @select-category="handleCategorySelect"
             @remove-category="handleCategoryRemove"
           />
@@ -98,6 +99,7 @@
           <category-tree 
             :categories="filteredOzonCategories" 
             platformType="ozon"
+            :searchQuery="ozonSearchQuery"
             @select-category="handleCategorySelect"
             @remove-category="handleCategoryRemove"
           />

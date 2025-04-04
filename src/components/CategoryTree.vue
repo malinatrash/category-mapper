@@ -9,18 +9,24 @@
         :key="category.id"
         :category="category"
         :platformType="platformType"
+        :searchQuery="searchQuery"
         @select-category="$emit('select-category', $event)"
         @remove-category="$emit('remove-category', $event)"
+        @has-match="hasMatchingResults = true"
       />
     </ul>
+    <div v-if="searchQuery && !hasMatchingResults && categories.length > 0" class="no-results">
+      По запросу «{{ searchQuery }}» ничего не найдено
+    </div>
   </div>
 </template>
 
 <script setup>
+import { ref, watch } from 'vue'
 import CategoryTreeNode from './CategoryTreeNode.vue'
 
 // Props
-defineProps({
+const props = defineProps({
   categories: {
     type: Array,
     required: true
@@ -29,7 +35,19 @@ defineProps({
     type: String,
     required: true,
     validator: (value) => ['ozon', 'wb'].includes(value)
+  },
+  searchQuery: {
+    type: String,
+    default: ''
   }
+})
+
+// State
+const hasMatchingResults = ref(false)
+
+// Сбрасываем флаг результатов при изменении поискового запроса
+watch(() => props.searchQuery, () => {
+  hasMatchingResults.value = false
 })
 
 // Emits
