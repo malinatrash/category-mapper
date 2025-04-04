@@ -1,0 +1,44 @@
+version: '3.8'
+
+services:
+  category-mapper:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: category-mapper
+    ports:
+      - "8080:80"
+    restart: unless-stopped
+    volumes:
+      # Монтируем каталог с данными категорий
+      - ./public/data:/usr/share/nginx/html/data:ro
+    environment:
+      - NODE_ENV=production
+
+# Для масштабирования в будущем можно добавить дополнительные сервисы:
+# Например, API сервер, базу данных, кэш и т.д.
+#
+#  api:
+#    image: category-mapper-api
+#    build:
+#      context: ./api
+#    container_name: category-mapper-api
+#    ports:
+#      - "3000:3000"
+#    depends_on:
+#      - db
+#    environment:
+#      - NODE_ENV=production
+#
+#  db:
+#    image: postgres:14-alpine
+#    container_name: category-mapper-db
+#    volumes:
+#      - db-data:/var/lib/postgresql/data
+#    environment:
+#      - POSTGRES_PASSWORD=password
+#      - POSTGRES_USER=category_mapper
+#      - POSTGRES_DB=category_mapper
+#
+# volumes:
+#   db-data:
