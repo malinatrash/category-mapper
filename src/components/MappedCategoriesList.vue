@@ -57,9 +57,20 @@
             <span v-else class="mapped-badge">Сопоставлено</span>
           </td>
           <td class="actions-cell">
-            <button @click="removeMapping(mapping.shopz_id)" class="remove-btn" title="Удалить сопоставление">
-              ✕
-            </button>
+            <div class="action-buttons">
+              <button 
+                @click="cancelMapping(mapping.shopz_id)" 
+                class="cancel-btn" 
+                title="Отменить сопоставление (вернуть в несопоставленные)">
+                ↺
+              </button>
+              <button 
+                @click="removeMapping(mapping.shopz_id)" 
+                class="remove-btn" 
+                title="Удалить сопоставление">
+                ✕
+              </button>
+            </div>
           </td>
         </tr>
       </tbody>
@@ -108,12 +119,19 @@ const filteredMappings = computed(() => {
 })
 
 // Emits
-const emit = defineEmits(['remove-mapping'])
+const emit = defineEmits(['remove-mapping', 'cancel-mapping'])
 
 // Methods
 const removeMapping = (shopzId) => {
   if (confirm('Вы уверены, что хотите удалить это сопоставление?')) {
     emit('remove-mapping', shopzId)
+  }
+}
+
+// Отменить сопоставление и вернуть категорию в несопоставленные
+const cancelMapping = (shopzId) => {
+  if (confirm('Вы уверены, что хотите отменить сопоставление? Категории вернутся в список несопоставленных.')) {
+    emit('cancel-mapping', shopzId)
   }
 }
 </script>

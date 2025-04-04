@@ -109,6 +109,7 @@
         <mapped-categories-list 
           :mappedCategories="sessionStore.mappedCategories"
           @remove-mapping="sessionStore.removeMapping"
+          @cancel-mapping="sessionStore.cancelMapping"
         />
       </div>
     </div>

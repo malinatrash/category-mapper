@@ -169,7 +169,12 @@ export const useSessionStore = defineStore(
 			}
 		}
 
-		// Remove mapping
+		// Функция проверки существования категории в массиве
+		const categoryExists = (categoryArray, categoryId) => {
+			return categoryArray.some(cat => cat.id === categoryId)
+		}
+
+		// Remove mapping - удаляет сопоставление полностью с возможностью возврата категорий
 		const removeMapping = shopz_id => {
 			const mapping = mappedCategories.value.find(m => m.shopz_id === shopz_id)
 
@@ -177,23 +182,66 @@ export const useSessionStore = defineStore(
 
 			// If the mapping had an Ozon category, add it back to unmapped
 			if (mapping.ozon_id && !mapping.not_sold) {
-				unmappedOzonCategories.value.push({
-					id: mapping.ozon_id,
-					name: mapping.ozon_name,
-					parent_id: mapping.shopz_parent_id, // Сохраняем правильный parent_id
-				})
+				// Проверяем, что категория ещё не существует в массиве
+				if (!categoryExists(unmappedOzonCategories.value, mapping.ozon_id)) {
+					unmappedOzonCategories.value.push({
+						id: mapping.ozon_id,
+						name: mapping.ozon_name,
+						parent_id: mapping.shopz_parent_id // Сохраняем правильный parent_id
+					})
+				}
 			}
 
 			// If the mapping had a WB category, add it back to unmapped
 			if (mapping.wb_id && !mapping.not_sold) {
-				unmappedWbCategories.value.push({
-					id: mapping.wb_id,
-					name: mapping.wb_name,
-					parent_id: null, // We don't have the original parent_id anymore
-				})
+				// Проверяем, что категория ещё не существует в массиве
+				if (!categoryExists(unmappedWbCategories.value, mapping.wb_id)) {
+					unmappedWbCategories.value.push({
+						id: mapping.wb_id,
+						name: mapping.wb_name,
+						parent_id: null // We don't have the original parent_id anymore
+					})
+				}
 			}
 
 			// Remove the mapping
+			mappedCategories.value = mappedCategories.value.filter(
+				m => m.shopz_id !== shopz_id
+			)
+		}
+		
+		// Cancel mapping - только отменяет сопоставление и возвращает категории в несопоставленные
+		const cancelMapping = shopz_id => {
+			const mapping = mappedCategories.value.find(m => m.shopz_id === shopz_id)
+
+			if (!mapping) return
+
+			// Гарантируем, что обе категории будут возвращены в несопоставленные
+			if (mapping.ozon_id) {
+				// Проверяем, что категория ещё не существует в массиве
+				if (!categoryExists(unmappedOzonCategories.value, mapping.ozon_id)) {
+					// Добавляем обратно категорию Ozon с правильным parent_id
+					unmappedOzonCategories.value.push({
+						id: mapping.ozon_id,
+						name: mapping.ozon_name,
+						parent_id: mapping.shopz_parent_id
+					})
+				}
+			}
+			
+			if (mapping.wb_id) {
+				// Проверяем, что категория ещё не существует в массиве
+				if (!categoryExists(unmappedWbCategories.value, mapping.wb_id)) {
+					// Добавляем обратно категорию WB
+					unmappedWbCategories.value.push({
+						id: mapping.wb_id,
+						name: mapping.wb_name,
+						parent_id: null
+					})
+				}
+			}
+
+			// Удаляем сопоставление
 			mappedCategories.value = mappedCategories.value.filter(
 				m => m.shopz_id !== shopz_id
 			)
@@ -408,6 +456,7 @@ export const useSessionStore = defineStore(
 			mapCategories,
 			markCategoryAsNotSold,
 			removeMapping,
+			cancelMapping, // Новая функция отмены сопоставления
 			exportSession,
 			importSession,
 			resetSession,
