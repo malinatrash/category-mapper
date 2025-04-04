@@ -5,7 +5,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: category-mapper
+    container_name: category-mapper2
     ports:
       - '8081:80'
     restart: unless-stopped
