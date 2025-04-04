@@ -10,149 +10,216 @@
         />
         <span class="search-icon">🔍</span>
       </div>
-      <div class="mapping-count" v-if="mappedCategories.length > 0">
-        {{ filteredMappings.length }} из {{ mappedCategories.length }} сопоставлений
+      <div class="mapping-count" v-if="categoryMappings.length > 0">
+        {{ filteredMappings.length }} из {{ categoryMappings.length }} категорий ShopZZ
       </div>
     </div>
     
-    <div v-if="mappedCategories.length === 0" class="empty-message">
-      Категории еще не сопоставлены. Сопоставьте категории, чтобы увидеть их здесь.
+    <div v-if="categoryMappings.length === 0" class="empty-message">
+      <div class="empty-icon">📋</div>
+      <div class="empty-text">Нет сопоставленных категорий</div>
+      <div class="empty-subtext">Используйте панель сопоставления для создания новых связей</div>
     </div>
     
     <div v-else-if="filteredMappings.length === 0" class="empty-message">
-      Нет сопоставлений, соответствующих критериям поиска.
+      <div class="empty-icon">🔍</div>
+      <div class="empty-text">Нет результатов</div>
+      <div class="empty-subtext">Измените параметры поиска для отображения категорий</div>
     </div>
     
-    <table v-else class="mapping-table">
-      <thead>
-        <tr>
-          <th>ShopZZ ID</th>
-          <th>Parent ID</th>
-          <th>Категория Wildberries</th>
-          <th>Категория Ozon</th>
-          <th>Статус</th>
-          <th>Действия</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr v-for="mapping in filteredMappings" :key="mapping.shopz_id" :class="{ 'not-sold': mapping.not_sold }">
-          <td class="id-cell">{{ mapping.shopz_id }}</td>
-          <td class="id-cell">{{ mapping.shopz_parent_id !== null ? mapping.shopz_parent_id : '–' }}</td>
-          <td class="category-cell">
-            <div v-if="mapping.wb_id">
-              <div>{{ mapping.wb_name }}</div>
-              <div class="category-id">ID: {{ mapping.wb_id }}</div>
+    <div v-else class="mapping-cards-container">
+      <div 
+        v-for="mapping in filteredMappings" 
+        :key="mapping.shopzz_id" 
+        class="mapping-card"
+        :class="{ 'not-sold': mapping.not_sold }"
+      >
+        <!-- ShopZZ Category Header -->
+        <div class="mapping-card-header">
+          <div class="platform-indicator shopzz">
+            <span class="platform-icon">ShopZZ</span>
+          </div>
+          <div class="category-title">
+            {{ mapping.shopzz_name }}
+            <span v-if="mapping.not_sold" class="not-sold-badge">Не продается</span>
+          </div>
+          <div class="category-id">ID: {{ mapping.shopzz_id }}</div>
+        </div>
+        
+        <!-- Mapping Content -->
+        <div class="mapping-card-content">
+          <!-- Status Summary -->
+          <div class="mapping-summary">
+            <div class="mapping-stats">
+              <div class="stat-item">
+                <span class="stat-label">Всего связей:</span>
+                <span class="stat-value">{{ mapping.mappings.length }}</span>
+              </div>
+              <div class="platforms-summary">
+                <span 
+                  class="platform-tag ozon"
+                  v-if="countPlatformMappings(mapping, 'ozon') > 0"
+                >
+                  Ozon: {{ countPlatformMappings(mapping, 'ozon') }}
+                </span>
+                <span 
+                  class="platform-tag wb"
+                  v-if="countPlatformMappings(mapping, 'wb') > 0"
+                >
+                  WB: {{ countPlatformMappings(mapping, 'wb') }}
+                </span>
+              </div>
             </div>
-            <div v-else class="not-available">Недоступно</div>
-          </td>
-          <td class="category-cell">
-            <div v-if="mapping.ozon_id">
-              <div>{{ mapping.ozon_name }}</div>
-              <div class="category-id">ID: {{ mapping.ozon_id }}</div>
-            </div>
-            <div v-else class="not-available">Недоступно</div>
-          </td>
-          <td class="status-cell">
-            <span v-if="mapping.not_sold" class="not-sold-badge">Не продается на ShopZZ</span>
-            <span v-else class="mapped-badge">Сопоставлено</span>
-          </td>
-          <td class="actions-cell">
-            <div class="action-buttons">
+            <div>
               <button 
-                @click="cancelMapping(mapping.shopz_id)" 
-                class="cancel-btn" 
-                title="Отменить сопоставление (вернуть в несопоставленные)">
-                ↺
-              </button>
-              <button 
-                @click="removeMapping(mapping.shopz_id)" 
-                class="remove-btn" 
-                title="Удалить сопоставление">
-                ✕
+                type="button"
+                @click.prevent.stop="handleCancelAllMappings(mapping.shopzz_id)" 
+                class="action-btn remove-all"
+                title="Удалить все сопоставления"
+              >
+                <span class="btn-icon">🗑️</span> Удалить все
               </button>
             </div>
-          </td>
-        </tr>
-      </tbody>
-    </table>
+          </div>
+          
+          <!-- External Mappings -->
+          <div class="external-mappings-container">
+            <div v-if="mapping.mappings.length === 0" class="no-mappings">
+              <span class="no-mappings-icon">ℹ️</span>
+              <span class="no-mappings-text">Нет связанных категорий</span>
+            </div>
+            
+            <div v-else class="external-mappings-list">
+              <div 
+                v-for="extMapping in mapping.mappings" 
+                :key="`${extMapping.platform}-${extMapping.id}`"
+                class="external-mapping-item"
+                :class="extMapping.platform"
+              >
+                <div class="external-mapping-content">
+                  <div class="platform-badge" :class="extMapping.platform">
+                    {{ getPlatformLabel(extMapping.platform) }}
+                  </div>
+                  <div class="external-details">
+                    <div class="external-name">{{ extMapping.name }}</div>
+                    <div class="external-id">ID: {{ extMapping.id }}</div>
+                  </div>
+                </div>
+                
+                <div>
+                  <button 
+                    type="button"
+                    @click.prevent.stop="handleRemoveMapping(mapping.shopzz_id, extMapping.platform, extMapping.id)" 
+                    class="remove-mapping-btn"
+                    title="Удалить это сопоставление"
+                  >
+                    ✕
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { computed, ref } from 'vue'
 
 // Props
 const props = defineProps({
-  mappedCategories: {
+  categoryMappings: {
     type: Array,
     required: true
   }
 })
 
+// Emits
+const emit = defineEmits(['remove-mapping', 'cancel-all-mappings'])
+
 // Search state
 const searchQuery = ref('')
 
+// Обработчики для удаления маппингов
+const handleRemoveMapping = (shopzzId, platform, externalId) => {
+  emit('remove-mapping', shopzzId, platform, externalId)
+}
+
+const handleCancelAllMappings = (shopzzId) => {
+  emit('cancel-all-mappings', shopzzId)
+}
+
+// Helper function to get platform label
+const getPlatformLabel = (platform) => {
+  if (platform === 'ozon') return 'Ozon'
+  if (platform === 'wb') return 'Wildberries'
+  return platform
+}
+
+// Helper function to count mappings for a specific platform
+const countPlatformMappings = (mapping, platform) => {
+  if (!mapping.mappings) return 0
+  return mapping.mappings.filter(m => m.platform === platform).length
+}
+
 // Filtered mappings based on search
 const filteredMappings = computed(() => {
-  if (!searchQuery.value.trim()) return props.mappedCategories
+  if (!searchQuery.value.trim()) return props.categoryMappings
   
   const query = searchQuery.value.toLowerCase()
   
-  return props.mappedCategories.filter(mapping => {
-    // Search in ShopZZ ID (теперь это число)
-    if (String(mapping.shopz_id).includes(query)) return true
+  return props.categoryMappings.filter(mapping => {
+    // Search in ShopZZ category details
+    if (mapping.shopzz_name?.toLowerCase().includes(query)) return true
+    if (String(mapping.shopzz_id).includes(query)) return true
     
-    // Search in WB category name and ID
-    if (mapping.wb_name?.toLowerCase().includes(query)) return true
-    if (String(mapping.wb_id).includes(query)) return true
-    
-    // Search in Ozon category name and ID
-    if (mapping.ozon_name?.toLowerCase().includes(query)) return true
-    if (String(mapping.ozon_id).includes(query)) return true
+    // Search in external mappings (Ozon, WB)
+    if (mapping.mappings && mapping.mappings.length > 0) {
+      for (const extMapping of mapping.mappings) {
+        if (extMapping.name?.toLowerCase().includes(query)) return true
+        if (String(extMapping.id).includes(query)) return true
+        if (extMapping.platform?.toLowerCase().includes(query)) return true
+      }
+    }
     
     // Search in status
-    if (mapping.not_sold && 'not sold'.includes(query)) return true
-    if (!mapping.not_sold && 'mapped'.includes(query)) return true
+    if (mapping.not_sold && ('not sold'.includes(query) || 'не продается'.includes(query))) return true
+    
+    // Search by platform name
+    if ('ozon'.includes(query) && countPlatformMappings(mapping, 'ozon') > 0) return true
+    if ('wildberries'.includes(query) && countPlatformMappings(mapping, 'wb') > 0) return true
+    if ('wb'.includes(query) && countPlatformMappings(mapping, 'wb') > 0) return true
     
     return false
   })
 })
 
-// Emits
-const emit = defineEmits(['remove-mapping', 'cancel-mapping'])
 
-// Methods
-const removeMapping = (shopzId) => {
-  if (confirm('Вы уверены, что хотите удалить это сопоставление?')) {
-    emit('remove-mapping', shopzId)
-  }
-}
-
-// Отменить сопоставление и вернуть категорию в несопоставленные
-const cancelMapping = (shopzId) => {
-  if (confirm('Вы уверены, что хотите отменить сопоставление? Категории вернутся в список несопоставленных.')) {
-    emit('cancel-mapping', shopzId)
-  }
-}
 </script>
-
 <style scoped>
+/* Main container styles */
 .mapped-categories-list {
   width: 100%;
   overflow-x: auto;
   border: 1px solid var(--light-green);
-  border-radius: 4px;
-  padding: 10px;
-  background-color: white;
-  max-height: 400px;
+  border-radius: 8px;
+  padding: 15px;
+  background-color: #f9fafb;
+  max-height: 600px;
   overflow-y: auto;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
 }
 
+/* Header styles */
 .mapped-list-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 15px;
+  margin-bottom: 20px;
+  padding-bottom: 15px;
+  border-bottom: 1px solid #eaecef;
 }
 
 .search-container {
@@ -162,132 +229,424 @@ const cancelMapping = (shopzId) => {
 
 .search-input {
   width: 100%;
-  padding: 8px 12px 8px 30px;
+  padding: 10px 12px 10px 36px;
   border: 1px solid #e0e0e0;
-  border-radius: 4px;
-  font-size: 0.9rem;
-  transition: all 0.3s;
+  border-radius: 6px;
+  font-size: 0.95rem;
+  transition: all 0.2s ease;
   background-color: white;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
 }
 
 .search-input:focus {
   border-color: var(--primary-color);
   outline: none;
-  box-shadow: 0 0 0 2px rgba(76, 175, 80, 0.2);
+  box-shadow: 0 0 0 3px rgba(76, 175, 80, 0.15);
 }
 
 .search-icon {
   position: absolute;
-  left: 10px;
+  left: 12px;
   top: 50%;
   transform: translateY(-50%);
   color: #999;
   pointer-events: none;
+  font-size: 1.1rem;
 }
 
 .mapping-count {
-  font-size: 0.9rem;
+  font-size: 0.95rem;
   color: #666;
+  font-weight: 500;
+  background-color: #f1f5f1;
+  padding: 5px 10px;
+  border-radius: 20px;
 }
 
+/* Empty state styles */
 .empty-message {
   text-align: center;
   color: #666;
-  padding: 20px;
-  font-style: italic;
+  padding: 40px 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background-color: white;
+  border-radius: 8px;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.05);
 }
 
-.mapping-table {
-  width: 100%;
-  border-collapse: collapse;
+.empty-icon {
+  font-size: 2.5rem;
+  margin-bottom: 15px;
+  color: #aaa;
 }
 
-.mapping-table th,
-.mapping-table td {
-  padding: 8px 12px;
-  text-align: left;
-  border-bottom: 1px solid #e0e0e0;
+.empty-text {
+  font-size: 1.2rem;
+  font-weight: 500;
+  margin-bottom: 8px;
+  color: #555;
 }
 
-.mapping-table th {
-  background-color: var(--light-green);
+.empty-subtext {
+  font-size: 0.95rem;
+  color: #888;
+  max-width: 400px;
+}
+
+/* Mapping cards container */
+.mapping-cards-container {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+  gap: 20px;
+}
+
+/* Mapping card styles */
+.mapping-card {
+  border-radius: 8px;
+  overflow: hidden;
+  background-color: white;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  display: flex;
+  flex-direction: column;
+  transition: transform 0.2s, box-shadow 0.2s;
+  border: 1px solid #eaecef;
+}
+
+.mapping-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.mapping-card.not-sold {
+  background-color: white;
+  border-color: rgba(244, 67, 54, 0.3);
+  box-shadow: 0 2px 8px rgba(244, 67, 54, 0.08);
+}
+
+/* Card header */
+.mapping-card-header {
+  padding: 15px;
+  background-color: #f5f9f5;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  border-bottom: 1px solid #eaecef;
+}
+
+.mapping-card.not-sold .mapping-card-header {
+  background-color: rgba(244, 67, 54, 0.05);
+}
+
+.platform-indicator {
+  display: inline-flex;
+  align-items: center;
+  margin-bottom: 5px;
+}
+
+.platform-indicator.shopzz .platform-icon {
   font-weight: 600;
-  color: var(--accent-color);
+  font-size: 0.85rem;
+  color: var(--primary-color);
 }
 
-.mapping-table tr:last-child td {
-  border-bottom: none;
-}
-
-.mapping-table tr:hover {
-  background-color: var(--light-green);
-}
-
-.id-cell {
-  font-family: monospace;
-  color: #666;
-  font-size: 0.9rem;
-}
-
-.category-cell {
-  max-width: 300px;
-}
-
-.category-id {
-  font-size: 0.8rem;
-  color: #666;
-}
-
-.not-available {
-  color: #999;
-  font-style: italic;
-}
-
-.status-cell {
-  white-space: nowrap;
-}
-
-.mapped-badge {
-  background-color: var(--primary-color);
-  color: white;
-  padding: 2px 8px;
-  border-radius: 10px;
-  font-size: 0.8rem;
+.category-title {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #333;
+  margin: 0;
+  word-break: break-word;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .not-sold-badge {
+  font-size: 0.7rem;
+  font-weight: 600;
   background-color: var(--danger-color);
   color: white;
+  padding: 3px 8px;
+  border-radius: 20px;
+  display: inline-flex;
+  align-items: center;
+}
+
+.category-id {
+  font-size: 0.85rem;
+  color: #666;
+  font-family: monospace;
+}
+
+/* Card content */
+.mapping-card-content {
+  padding: 15px;
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+/* Mapping summary */
+.mapping-summary {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background-color: #f9fafb;
+  padding: 10px;
+  border-radius: 6px;
+  border: 1px solid #eaecef;
+}
+
+.mapping-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.stat-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.85rem;
+}
+
+.stat-label {
+  color: #666;
+}
+
+.stat-value {
+  font-weight: 600;
+  color: #333;
+}
+
+.platforms-summary {
+  display: flex;
+  gap: 8px;
+  margin-top: 5px;
+}
+
+.platform-tag {
+  font-size: 0.75rem;
+  font-weight: 600;
   padding: 2px 8px;
-  border-radius: 10px;
-  font-size: 0.8rem;
+  border-radius: 20px;
+  display: inline-flex;
+  align-items: center;
 }
 
-.actions-cell {
-  width: 60px;
-  text-align: center;
+.platform-tag.ozon {
+  background-color: rgba(0, 91, 255, 0.1);
+  color: #005bff;
 }
 
-.remove-btn {
-  background: none;
-  border: none;
-  color: var(--danger-color);
+.platform-tag.wb {
+  background-color: rgba(203, 17, 171, 0.1);
+  color: #cb11ab;
+}
+
+.action-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.85rem;
+  padding: 5px 10px;
+  border-radius: 4px;
   cursor: pointer;
-  font-weight: bold;
-  padding: 0 4px;
+  transition: all 0.2s;
+  border: none;
+  white-space: nowrap;
+}
+
+.action-btn.remove-all {
+  background-color: #fff1f0;
+  color: var(--danger-color);
+  position: relative;
+  z-index: 20 !important;
+  pointer-events: auto !important;
+  cursor: pointer !important;
+  border: none;
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 16px;
+  border-radius: 4px;
+  font-weight: 500;
+}
+
+.action-btn.remove-all:hover {
+  background-color: #ffccc7;
+}
+
+.btn-icon {
   font-size: 1rem;
 }
 
-.remove-btn:hover {
-  background-color: #ffebeb;
-  border-radius: 4px;
+/* External mapping styles */
+.external-mappings-container {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
-tr.not-sold {
+.no-mappings {
+  text-align: center;
+  color: #888;
+  font-size: 0.9rem;
+  padding: 15px;
+  background-color: #f9fafb;
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+}
+
+.no-mappings-icon {
+  font-size: 1.2rem;
+  opacity: 0.7;
+}
+
+.external-mappings-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.external-mapping-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  background-color: #f9fafb;
+  border-radius: 6px;
+  border: 1px solid #eaecef;
+  transition: background-color 0.2s;
+  position: relative;
+  isolation: isolate; /* Создает новый контекст наложения */
+}
+
+.external-mapping-item:hover {
+  background-color: #f5f5f5;
+}
+
+.external-mapping-item.ozon {
+  border-left: 3px solid #005bff;
+}
+
+.external-mapping-item.wb {
+  border-left: 3px solid #cb11ab;
+}
+
+.external-mapping-content {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  pointer-events: auto;
+}
+
+.platform-badge {
+  font-size: 0.8rem;
+  padding: 3px 8px;
+  background-color: #e0e0e0;
+  color: #333;
+  border-radius: 20px;
+  font-weight: 600;
+  min-width: 70px;
+  text-align: center;
+}
+
+.platform-badge.ozon {
+  background-color: rgba(0, 91, 255, 0.1);
+  color: #005bff;
+}
+
+.platform-badge.wb {
+  background-color: rgba(203, 17, 171, 0.1);
+  color: #cb11ab;
+}
+
+.external-details {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1;
+}
+
+.external-name {
+  font-size: 0.9rem;
+  color: #333;
+  word-break: break-word;
+}
+
+.external-id {
+  font-size: 0.8rem;
+  color: #666;
+  font-family: monospace;
+}
+
+.remove-mapping-btn {
+  background: none;
+  border: none;
+  color: #999;
+  cursor: pointer !important;
+  font-size: 1rem;
+  padding: 0 4px;
+  transition: color 0.2s;
+  height: 30px;
+  width: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  position: relative;
+  z-index: 20 !important;
+  pointer-events: auto !important;
+}
+
+.remove-mapping-btn:hover {
+  color: #f44336;
   background-color: rgba(244, 67, 54, 0.1);
 }
 
-tr.not-sold:hover {
-  background-color: rgba(244, 67, 54, 0.15);
+.action-btn-wrapper,
+.remove-btn-wrapper {
+  position: relative;
+  z-index: 10;
+}
+
+.action-btn-wrapper button,
+.remove-btn-wrapper button {
+  pointer-events: auto;
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+  .mapping-cards-container {
+    grid-template-columns: 1fr;
+  }
+  
+  .mapped-list-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+  }
+  
+  .search-container {
+    width: 100%;
+  }
+  
+  .mapping-summary {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+  }
+  
+  .action-btn {
+    width: 100%;
+    justify-content: center;
+  }
 }
 </style>

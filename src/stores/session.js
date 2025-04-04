@@ -1,25 +1,25 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 
-// Utility function to generate ShopZZ ID
-// Теперь просто используем Ozon ID как ShopZZ ID
-const getShopZId = ozonCategory => {
-	// Если есть Ozon ID, используем его
-	if (ozonCategory && ozonCategory.id) {
-		return ozonCategory.id
-	}
-	// В случае, если сопоставление создано только для WB категории (без Ozon)
-	// генерируем отрицательный ID, чтобы избежать конфликтов
-	return -1 * Math.floor(Math.random() * 1000000) - 1
-}
-
 export const useSessionStore = defineStore(
 	'session',
 	() => {
 		// State
-		const unmappedOzonCategories = ref([])
-		const unmappedWbCategories = ref([])
-		const mappedCategories = ref([])
+		// Primary categories (all three platforms)
+		const shopzzCategories = ref([])
+		const ozonCategories = ref([])
+		const wbCategories = ref([])
+		
+		// Original data for reset functionality
+		const originalShopzzCategories = ref([])
+		const originalOzonCategories = ref([])
+		const originalWbCategories = ref([]) 
+		
+		// Mapping storage
+		// Format: { shopzz_id, mappings: [{ platform: 'ozon'|'wb', id, name }] }
+		const categoryMappings = ref([])
+		
+		// UI State
 		const isLoading = ref(false)
 		const loadingMessage = ref('')
 
@@ -49,17 +49,10 @@ export const useSessionStore = defineStore(
 			return rootItems
 		}
 
-		// Create tree structure for categories
-		const ozonCategoryTree = computed(() =>
-			buildCategoryTree(unmappedOzonCategories.value)
-		)
-		const wbCategoryTree = computed(() =>
-			buildCategoryTree(unmappedWbCategories.value)
-		)
-
-		// Keep original data for reset functionality
-		const originalOzonCategories = ref([])
-		const originalWbCategories = ref([])
+		// Create tree structure for all category systems
+		const shopzzCategoryTree = computed(() => buildCategoryTree(shopzzCategories.value))
+		const ozonCategoryTree = computed(() => buildCategoryTree(ozonCategories.value))
+		const wbCategoryTree = computed(() => buildCategoryTree(wbCategories.value))
 
 		// Initialize data
 		const initializeData = async () => {
@@ -67,21 +60,33 @@ export const useSessionStore = defineStore(
 			loadingMessage.value = 'Loading category data...'
 
 			try {
+				// Load ShopZZ categories - this is our foundation hierarchy
+				loadingMessage.value = 'Loading ShopZZ categories...'
+				const shopzzResponse = await fetch('/data/shopzz_unified.json')
+				const shopzzData = await shopzzResponse.json()
+				
 				// Load Ozon categories
+				loadingMessage.value = 'Loading Ozon categories...'
 				const ozonResponse = await fetch('/data/ozon_unified.json')
 				const ozonData = await ozonResponse.json()
 
 				// Load WB categories
+				loadingMessage.value = 'Loading Wildberries categories...'
 				const wbResponse = await fetch('/data/wb_unified.json')
 				const wbData = await wbResponse.json()
 
 				// Store the original data for reset functionality
+				originalShopzzCategories.value = JSON.parse(JSON.stringify(shopzzData))
 				originalOzonCategories.value = JSON.parse(JSON.stringify(ozonData))
 				originalWbCategories.value = JSON.parse(JSON.stringify(wbData))
 
-				// Set unmapped categories
-				unmappedOzonCategories.value = ozonData
-				unmappedWbCategories.value = wbData
+				// Set category data
+				shopzzCategories.value = shopzzData
+				ozonCategories.value = ozonData
+				wbCategories.value = wbData
+
+				// Initialize the mappings array based on ShopZZ categories
+				initializeMappings()
 
 				loadingMessage.value = 'Category data loaded successfully'
 			} catch (error) {
@@ -92,168 +97,332 @@ export const useSessionStore = defineStore(
 			}
 		}
 
-		// Map categories
-		const mapCategories = (ozonCategory, wbCategory) => {
-			// Получаем ShopZZ ID на основе Ozon ID
-			const shopz_id = getShopZId(ozonCategory)
-
-			// Получаем parent_id из родительской категории Ozon
-			const shopz_parent_id = ozonCategory ? ozonCategory.parent_id : null
-
-			// Create mapping
-			mappedCategories.value.push({
-				shopz_id, // Теперь это integer
-				shopz_parent_id, // Добавлено: parent_id из Ozon
-				ozon_id: ozonCategory.id,
-				wb_id: wbCategory.id,
-				ozon_name: ozonCategory.name,
-				wb_name: wbCategory.name,
-				timestamp: new Date().toISOString(),
-				not_sold: false,
+		// Initialize mappings from ShopZZ categories
+		const initializeMappings = () => {
+			// Start with empty mappings array
+			categoryMappings.value = []
+			
+			// Create a mapping entry for each ShopZZ category
+			shopzzCategories.value.forEach(category => {
+				categoryMappings.value.push({
+					shopzz_id: category.id,
+					shopzz_name: category.name,
+					shopzz_parent_id: category.parent_id,
+					mappings: [], // Will contain both Ozon and WB mappings
+					timestamp: new Date().toISOString(),
+				})
 			})
-
-			// Remove from unmapped categories
-			unmappedOzonCategories.value = unmappedOzonCategories.value.filter(
-				category => category.id !== ozonCategory.id
-			)
-
-			unmappedWbCategories.value = unmappedWbCategories.value.filter(
-				category => category.id !== wbCategory.id
-			)
-		}
-
-		// Mark category as not sold (removed)
-		const markCategoryAsNotSold = (platform, category) => {
-			if (platform === 'ozon') {
-				// Получаем ShopZZ ID на основе Ozon ID
-				const shopz_id = getShopZId(category)
-				// Получаем parent_id из родительской категории Ozon
-				const shopz_parent_id = category.parent_id
-
-				// Create mapping with only Ozon category
-				mappedCategories.value.push({
-					shopz_id,
-					shopz_parent_id, // Добавлено: parent_id из Ozon
-					ozon_id: category.id,
-					wb_id: null,
-					ozon_name: category.name,
-					wb_name: null,
-					timestamp: new Date().toISOString(),
-					not_sold: true,
-				})
-
-				// Remove from unmapped categories
-				unmappedOzonCategories.value = unmappedOzonCategories.value.filter(
-					c => c.id !== category.id
-				)
-			} else if (platform === 'wb') {
-				// Для WB категорий создаем отрицательный ID, так как мы не можем наследовать от Ozon
-				const shopz_id = getShopZId(null)
-
-				// Create mapping with only WB category
-				mappedCategories.value.push({
-					shopz_id,
-					shopz_parent_id: null, // Нет связи с иерархией Ozon
-					ozon_id: null,
-					wb_id: category.id,
-					ozon_name: null,
-					wb_name: category.name,
-					timestamp: new Date().toISOString(),
-					not_sold: true,
-				})
-
-				// Remove from unmapped categories
-				unmappedWbCategories.value = unmappedWbCategories.value.filter(
-					c => c.id !== category.id
-				)
-			}
-		}
-
-		// Функция проверки существования категории в массиве
-		const categoryExists = (categoryArray, categoryId) => {
-			return categoryArray.some(cat => cat.id === categoryId)
-		}
-
-		// Remove mapping - удаляет сопоставление полностью с возможностью возврата категорий
-		const removeMapping = shopz_id => {
-			const mapping = mappedCategories.value.find(m => m.shopz_id === shopz_id)
-
-			if (!mapping) return
-
-			// If the mapping had an Ozon category, add it back to unmapped
-			if (mapping.ozon_id && !mapping.not_sold) {
-				// Проверяем, что категория ещё не существует в массиве
-				if (!categoryExists(unmappedOzonCategories.value, mapping.ozon_id)) {
-					unmappedOzonCategories.value.push({
-						id: mapping.ozon_id,
-						name: mapping.ozon_name,
-						parent_id: mapping.shopz_parent_id // Сохраняем правильный parent_id
-					})
-				}
-			}
-
-			// If the mapping had a WB category, add it back to unmapped
-			if (mapping.wb_id && !mapping.not_sold) {
-				// Проверяем, что категория ещё не существует в массиве
-				if (!categoryExists(unmappedWbCategories.value, mapping.wb_id)) {
-					unmappedWbCategories.value.push({
-						id: mapping.wb_id,
-						name: mapping.wb_name,
-						parent_id: null // We don't have the original parent_id anymore
-					})
-				}
-			}
-
-			// Remove the mapping
-			mappedCategories.value = mappedCategories.value.filter(
-				m => m.shopz_id !== shopz_id
-			)
+			
+			// Check for any saved mappings in localStorage (for persistence)
+			// This would be implemented later if needed for backward compatibility
 		}
 		
-		// Cancel mapping - только отменяет сопоставление и возвращает категории в несопоставленные
-		const cancelMapping = shopz_id => {
-			const mapping = mappedCategories.value.find(m => m.shopz_id === shopz_id)
+		// Функция для обновления визуального представления категорий
+		const updateCategoryVisualsBasedOnMappings = () => {
+			// Создаем карту сопоставленных ShopZZ ID для быстрого поиска
+			const mappedShopzzIds = new Set(
+				categoryMappings.value
+					.filter(mapping => mapping.mappings && mapping.mappings.length > 0)
+					.map(mapping => String(mapping.shopzz_id))
+			)
 
-			if (!mapping) return
+			// Обновляем реактивные массивы для перезапуска рендеринга
+			shopzzCategories.value = [...shopzzCategories.value]
+			ozonCategories.value = [...ozonCategories.value]
+			wbCategories.value = [...wbCategories.value]
+			categoryMappings.value = [...categoryMappings.value]
+		}
 
-			// Гарантируем, что обе категории будут возвращены в несопоставленные
-			if (mapping.ozon_id) {
-				// Проверяем, что категория ещё не существует в массиве
-				if (!categoryExists(unmappedOzonCategories.value, mapping.ozon_id)) {
-					// Добавляем обратно категорию Ozon с правильным parent_id
-					unmappedOzonCategories.value.push({
-						id: mapping.ozon_id,
-						name: mapping.ozon_name,
-						parent_id: mapping.shopz_parent_id
+		// Find a ShopZZ category mapping by ID
+		const findShopzzMapping = (shopzzId) => {
+			// Преобразуем ID в строку для надежного сравнения
+			const shopzzIdStr = String(shopzzId)
+			return categoryMappings.value.find(mapping => String(mapping.shopzz_id) === shopzzIdStr)
+		}
+		
+		// Find category by ID in a category array
+		const findCategoryById = (categories, id) => {
+			return categories.find(category => category.id === id)
+		}
+		
+		// Map an external category (Ozon or WB) to a ShopZZ category
+		const mapCategory = (shopzzId, platform, externalCategory) => {
+			const mapping = findShopzzMapping(shopzzId)
+			
+			if (!mapping) {
+				console.error(`ShopZZ category with ID ${shopzzId} not found`)
+				return false
+			}
+			
+			// Check if this external category is already mapped
+			const existingMapping = mapping.mappings.find(
+				m => m.platform === platform && m.id === externalCategory.id
+			)
+			
+			if (existingMapping) {
+				console.warn(`Category ${externalCategory.id} from ${platform} is already mapped`)
+				return false
+			}
+			
+			// Add the mapping
+			mapping.mappings.push({
+				platform,
+				id: externalCategory.id,
+				name: externalCategory.name,
+				timestamp: new Date().toISOString()
+			})
+			
+			// Не удаляем ShopZZ категорию из списка доступных, чтобы она оставалась видимой
+			// Возможно отметить категорию как-то, чтобы показать что она уже сопоставлена
+			// Но сохраняем её в списке для наглядности
+
+			// Remove the external category from the available list based on platform
+			if (platform === 'ozon') {
+				// Remove from ozonCategories
+				const index = ozonCategories.value.findIndex(cat => cat.id === externalCategory.id)
+				if (index !== -1) {
+					// Optional: save removed category to restore it later if needed
+					// const removedCategory = ozonCategories.value[index]
+					ozonCategories.value.splice(index, 1)
+				}
+			} else if (platform === 'wb') {
+				// Remove from wbCategories
+				const index = wbCategories.value.findIndex(cat => cat.id === externalCategory.id)
+				if (index !== -1) {
+					// Optional: save removed category to restore it later if needed
+					// const removedCategory = wbCategories.value[index]
+					wbCategories.value.splice(index, 1)
+				}
+			}
+			
+			// Явное обновление реактивных данных для обновления UI
+			categoryMappings.value = [...categoryMappings.value]
+			
+			// Обновляем визуальное представление категорий
+			updateCategoryVisualsBasedOnMappings()
+			
+			return true
+		}
+
+		// Mark a ShopZZ category as not sold
+		const markCategoryAsNotSold = (shopzzId) => {
+			const mapping = findShopzzMapping(shopzzId)
+			
+			if (!mapping) {
+				console.error(`ShopZZ category with ID ${shopzzId} not found`)
+				return false
+			}
+			
+			// Add a not_sold flag to the mapping
+			mapping.not_sold = true
+			mapping.timestamp = new Date().toISOString()
+			
+			return true
+		}
+		
+		// Remove a mapping between a ShopZZ category and an external category (Ozon or WB)
+		const removeMapping = (shopzzId, platform, externalId) => {
+			console.log(`Removing mapping: ShopZZ ID=${shopzzId}, platform=${platform}, externalId=${externalId}`)
+			
+			// Преобразование ID в строковый формат для корректного сравнения
+			const shopzzIdStr = String(shopzzId)
+			const externalIdStr = String(externalId)
+			
+			// Поиск сопоставления категории ShopZZ
+			const mappingIndex = categoryMappings.value.findIndex(m => String(m.shopzz_id) === shopzzIdStr)
+			
+			if (mappingIndex === -1) {
+				console.error(`ShopZZ category with ID ${shopzzIdStr} not found in categoryMappings`)
+				return false
+			}
+			
+			const mapping = categoryMappings.value[mappingIndex]
+			console.log('DEBUG: Found mapping:', JSON.stringify(mapping))
+			console.log(`DEBUG: Mapping has ${mapping.mappings ? mapping.mappings.length : 0} mappings`)
+			
+			// Важно: проверим, что у mapping есть массив mappings
+			if (!mapping.mappings || !Array.isArray(mapping.mappings)) {
+				console.error('Mapping does not have a valid mappings array')
+				// Инициализируем массив, если его нет
+				mapping.mappings = []
+				return false
+			}
+			
+			// Находим конкретное сопоставление по платформе и ID
+			console.log(`Searching for mapping with platform=${platform} and externalId=${externalIdStr}`)
+			
+			// Проверяем, что массив маппингов действительно существует
+			if (!mapping.mappings || !Array.isArray(mapping.mappings)) {
+				console.error('Mapping does not have a valid mappings array')
+				mapping.mappings = []
+				return false
+			}
+			
+			// Ищем маппинг для удаления
+			const foundMappings = mapping.mappings.filter(m => m.platform === platform && String(m.id) === externalIdStr)
+			console.log(`Found ${foundMappings.length} mappings to remove`)
+			
+			if (foundMappings.length === 0) {
+				console.error(`Mapping not found for ${platform} category with ID ${externalIdStr}`)
+				return false
+			}
+			
+
+			
+			// Сохраняем информацию о сопоставлении перед удалением
+			console.log('Found external mapping to remove:', foundMappings[0])
+			
+			// Восстановление внешней категории в соответствующий список
+			if (platform === 'ozon') {
+				// Проверка существования категории в исходных данных
+				const originalCategory = originalOzonCategories.value.find(c => String(c.id) === externalId)
+				if (originalCategory) {
+					// Восстановление в ozonCategories, если еще не существует
+					if (!ozonCategories.value.some(c => String(c.id) === externalId)) {
+						console.log('Restoring Ozon category to available list:', originalCategory)
+						ozonCategories.value.push({
+							...originalCategory
+						})
+					}
+				}
+			} else if (platform === 'wb') {
+				// Проверка существования категории в исходных данных
+				const originalCategory = originalWbCategories.value.find(c => String(c.id) === externalId)
+				if (originalCategory) {
+					// Восстановление в wbCategories, если еще не существует
+					if (!wbCategories.value.some(c => String(c.id) === externalId)) {
+						console.log('Restoring WB category to available list:', originalCategory)
+						wbCategories.value.push({
+							...originalCategory
+						})
+					}
+				}
+			}
+			
+
+			
+			// Создаем новый массив сопоставлений без удаляемых элементов
+			// Используем фильтрацию вместо индексов для надежности
+			const updatedMappings = mapping.mappings.filter(m => !(m.platform === platform && String(m.id) === externalIdStr))
+			console.log(`Removed mappings. Original count: ${mapping.mappings.length}, new count: ${updatedMappings.length}`)
+			console.log('DEBUG: Updated mappings array:', JSON.stringify(updatedMappings))
+			
+			// Обновляем сопоставления для этой категории ShopZZ
+			mapping.mappings = updatedMappings
+			
+			// Если сопоставлений больше нет и категория не помечена как "не продается", 
+			// восстановить категорию ShopZZ в список доступных
+			if (mapping.mappings.length === 0 && !mapping.not_sold) {
+				const originalShopzzCategory = originalShopzzCategories.value.find(c => String(c.id) === shopzzId)
+				if (originalShopzzCategory && !shopzzCategories.value.some(c => String(c.id) === shopzzId)) {
+					console.log('Restoring ShopZZ category to available list:', originalShopzzCategory)
+					shopzzCategories.value.push({
+						...originalShopzzCategory
 					})
 				}
 			}
 			
-			if (mapping.wb_id) {
-				// Проверяем, что категория ещё не существует в массиве
-				if (!categoryExists(unmappedWbCategories.value, mapping.wb_id)) {
-					// Добавляем обратно категорию WB
-					unmappedWbCategories.value.push({
-						id: mapping.wb_id,
-						name: mapping.wb_name,
-						parent_id: null
-					})
+			mapping.timestamp = new Date().toISOString()
+			
+
+			
+			// Явно обновляем массив сопоставлений и запускаем реактивность
+			mapping.mappings = updatedMappings
+			categoryMappings.value = [...categoryMappings.value]
+			
+			// Обновляем визуальное представление категорий
+			updateCategoryVisualsBasedOnMappings()
+			
+			console.log('DEBUG: Mapping successfully removed')
+			return true
+		}
+
+		// Cancel all mappings for a ShopZZ category and remove the 'not sold' flag if present
+		const cancelAllMappings = (shopzzId) => {
+			console.log(`Canceling all mappings for ShopZZ ID=${shopzzId}`)
+			
+			// Преобразование ID в строковый формат для обеспечения корректного сравнения
+			const shopzzIdStr = String(shopzzId)
+			
+			// Поиск сопоставления категории ShopZZ
+			const mappingIndex = categoryMappings.value.findIndex(m => String(m.shopzz_id) === shopzzIdStr)
+			
+			if (mappingIndex === -1) {
+				console.error(`ShopZZ category with ID ${shopzzIdStr} not found in categoryMappings`)
+				return false
+			}
+			
+			const mapping = categoryMappings.value[mappingIndex]
+			console.log('Found mapping to cancel all:', mapping)
+			
+			// Сохраняем копию существующих сопоставлений для восстановления категорий
+			const existingMappings = [...mapping.mappings]
+			console.log('Mappings to restore:', existingMappings)
+			
+			// Восстановление всех внешних категорий в соответствующие списки
+			for (const externalMapping of existingMappings) {
+				const platform = externalMapping.platform
+				const externalId = String(externalMapping.id)
+				
+				// Восстановление внешней категории в соответствующий список
+				if (platform === 'ozon') {
+					// Проверка существования категории в исходных данных
+					const originalCategory = originalOzonCategories.value.find(c => String(c.id) === externalId)
+					if (originalCategory) {
+						// Восстановление в ozonCategories, если еще не существует
+						if (!ozonCategories.value.some(c => String(c.id) === externalId)) {
+							console.log('Restoring Ozon category to available list:', originalCategory)
+							ozonCategories.value.push({
+								...originalCategory
+							})
+						}
+					}
+				} else if (platform === 'wb') {
+					// Проверка существования категории в исходных данных
+					const originalCategory = originalWbCategories.value.find(c => String(c.id) === externalId)
+					if (originalCategory) {
+						// Восстановление в wbCategories, если еще не существует
+						if (!wbCategories.value.some(c => String(c.id) === externalId)) {
+							console.log('Restoring WB category to available list:', originalCategory)
+							wbCategories.value.push({
+								...originalCategory
+							})
+						}
+					}
 				}
 			}
-
-			// Удаляем сопоставление
-			mappedCategories.value = mappedCategories.value.filter(
-				m => m.shopz_id !== shopz_id
-			)
+			
+			// Очистка всех сопоставлений для этой категории ShopZZ
+			mapping.mappings = []
+			
+			// Если категория была помечена как "не продается", сбросить этот флаг
+			if (mapping.not_sold) {
+				mapping.not_sold = false
+			}
+			
+			// Категория ShopZZ остается в списке, не нужно восстанавливать
+			
+			mapping.timestamp = new Date().toISOString()
+			
+			// Обновляем весь объект categoryMappings для запуска реактивности Vue
+			categoryMappings.value = [...categoryMappings.value]
+			
+			// Обновляем визуальное представление категорий
+			updateCategoryVisualsBasedOnMappings()
+			
+			console.log('All mappings successfully canceled')
+			return true
 		}
 
 		// Export session data
 		const exportSession = () => {
 			const sessionData = {
-				unmappedOzonCategories: unmappedOzonCategories.value,
-				unmappedWbCategories: unmappedWbCategories.value,
-				mappedCategories: mappedCategories.value,
+				shopzzCategories: shopzzCategories.value,
+				ozonCategories: ozonCategories.value,
+				wbCategories: wbCategories.value,
+				categoryMappings: categoryMappings.value,
 				exportedAt: new Date().toISOString(),
+				version: '2.0' // New version tag to differentiate from old format
 			}
 
 			const dataStr = JSON.stringify(sessionData, null, 2)
@@ -273,16 +442,63 @@ export const useSessionStore = defineStore(
 
 		// Import session data
 		const importSession = sessionData => {
-			if (sessionData.unmappedOzonCategories) {
-				unmappedOzonCategories.value = sessionData.unmappedOzonCategories
-			}
-
-			if (sessionData.unmappedWbCategories) {
-				unmappedWbCategories.value = sessionData.unmappedWbCategories
-			}
-
-			if (sessionData.mappedCategories) {
-				mappedCategories.value = sessionData.mappedCategories
+			// Check if this is new format (version 2.0+)
+			if (sessionData.version && parseFloat(sessionData.version) >= 2.0) {
+				// Import directly using new format
+				if (sessionData.shopzzCategories) {
+					shopzzCategories.value = sessionData.shopzzCategories
+				}
+				
+				if (sessionData.ozonCategories) {
+					ozonCategories.value = sessionData.ozonCategories
+				}
+				
+				if (sessionData.wbCategories) {
+					wbCategories.value = sessionData.wbCategories
+				}
+				
+				if (sessionData.categoryMappings) {
+					categoryMappings.value = sessionData.categoryMappings
+				}
+			} else {
+				// Legacy import - handle old format data
+				console.warn('Importing from legacy format. Converting to new format...')
+				
+				// We would need shopzzCategories already loaded
+				if (sessionData.mappedCategories && sessionData.mappedCategories.length > 0) {
+					// For each old mapping, create a new mapping in the new format
+					sessionData.mappedCategories.forEach(oldMapping => {
+						// Find or create the ShopZZ category mapping
+						const mapping = findShopzzMapping(oldMapping.shopz_id)
+						
+						if (mapping) {
+							// Add Ozon mapping if present
+							if (oldMapping.ozon_id) {
+								mapping.mappings.push({
+									platform: 'ozon',
+									id: oldMapping.ozon_id,
+									name: oldMapping.ozon_name,
+									timestamp: oldMapping.timestamp
+								})
+							}
+							
+							// Add WB mapping if present
+							if (oldMapping.wb_id) {
+								mapping.mappings.push({
+									platform: 'wb',
+									id: oldMapping.wb_id,
+									name: oldMapping.wb_name,
+									timestamp: oldMapping.timestamp
+								})
+							}
+							
+							// Set not_sold flag if present in old mapping
+							if (oldMapping.not_sold) {
+								mapping.not_sold = true
+							}
+						}
+					})
+				}
 			}
 		}
 
@@ -298,15 +514,18 @@ export const useSessionStore = defineStore(
 
 				setTimeout(() => {
 					// Reset to original data
-					unmappedOzonCategories.value = JSON.parse(
+					shopzzCategories.value = JSON.parse(
+						JSON.stringify(originalShopzzCategories.value)
+					)
+					ozonCategories.value = JSON.parse(
 						JSON.stringify(originalOzonCategories.value)
 					)
-					unmappedWbCategories.value = JSON.parse(
+					wbCategories.value = JSON.parse(
 						JSON.stringify(originalWbCategories.value)
 					)
 
-					// Clear all mappings
-					mappedCategories.value = []
+					// Reinitialize mappings but with empty mapping arrays
+					initializeMappings()
 
 					loadingMessage.value = 'Session reset successfully'
 					isLoading.value = false
@@ -381,20 +600,98 @@ export const useSessionStore = defineStore(
 					loadingMessage.value = message
 				} else if (type === 'complete') {
 					// Обработка завершена, применяем результаты
+					let mappedCount = 0
+					let ozonCount = 0
+					let wbCount = 0
 
-					// Применяем сопоставления
-					result.matchingPairs.forEach(([ozonCategory, wbCategory]) => {
-						mapCategories(ozonCategory, wbCategory)
-					})
+					// Обрабатываем результаты в новом формате
+					if (result.mappingResults && result.mappingResults.length > 0) {
+						// Формат: массив объектов { shopzz, ozon: [], wb: [] }
+						result.mappingResults.forEach(mapping => {
+							const shopzzCategory = mapping.shopzz
+							let hasMappings = false
+							
+							// Добавляем все сопоставления Ozon
+							if (mapping.ozon && mapping.ozon.length > 0) {
+								mapping.ozon.forEach(ozonCategory => {
+									if (mapCategory(shopzzCategory.id, 'ozon', ozonCategory)) {
+										ozonCount++
+										hasMappings = true
+									}
+								})
+							}
+							
+							// Добавляем все сопоставления WB
+							if (mapping.wb && mapping.wb.length > 0) {
+								mapping.wb.forEach(wbCategory => {
+									if (mapCategory(shopzzCategory.id, 'wb', wbCategory)) {
+										wbCount++
+										hasMappings = true
+									}
+								})
+							}
+							
+							// Увеличиваем счетчик сопоставленных ShopZZ категорий
+							if (hasMappings) {
+								mappedCount++
+							}
+						})
+					} 
+					// Обратная совместимость со старыми форматами
+					else if (result.matchingTriples && result.matchingTriples.length > 0) {
+						// Применяем тройные сопоставления (ShopZZ -> Ozon -> WB)
+						mappedCount = result.matchingTriples.reduce((count, [shopzzCategory, ozonCategory, wbCategory]) => {
+							// Добавляем сопоставления для обеих платформ
+							const ozonMapped = mapCategory(shopzzCategory.id, 'ozon', ozonCategory)
+							const wbMapped = mapCategory(shopzzCategory.id, 'wb', wbCategory)
+							
+							if (ozonMapped) ozonCount++
+							if (wbMapped) wbCount++
+							
+							return count + (ozonMapped || wbMapped ? 1 : 0)
+						}, 0)
+					} else if (result.matchingPairs && result.matchingPairs.length > 0) {
+						// Старый формат с парами
+						mappedCount = result.matchingPairs.reduce((count, [ozonCategory, wbCategory]) => {
+							// Найдем подходящую ShopZZ категорию с таким же или похожим именем
+							let bestMatch = null
+							let bestSimilarity = threshold
+							
+							for (const shopzzCategory of shopzzCategories.value) {
+								const similarity = calculateStringSimilarity(
+									shopzzCategory.name,
+									ozonCategory.name
+								)
+								
+								if (similarity > bestSimilarity) {
+									bestMatch = shopzzCategory
+									bestSimilarity = similarity
+								}
+							}
+							
+							if (bestMatch) {
+								// Добавляем сопоставления для обеих платформ
+								const ozonMapped = mapCategory(bestMatch.id, 'ozon', ozonCategory)
+								const wbMapped = mapCategory(bestMatch.id, 'wb', wbCategory)
+								
+								if (ozonMapped) ozonCount++
+								if (wbMapped) wbCount++
+								
+								return count + (ozonMapped || wbMapped ? 1 : 0)
+							}
+							
+							return count
+						}, 0)
+					}
 
 					// Показываем итоговый отчет
 					loadingMessage.value = `Автосопоставление завершено за ${
 						result.timeMs
 					}мс:
         ✓ Обработано: ${result.stats.totalProcessed} категорий
-        ✓ Сопоставлено: ${result.stats.mapped} (${Math.round(
-						(result.stats.mapped / result.stats.totalProcessed) * 100
-					)}%)
+        ✓ Сопоставлено: ${mappedCount} ShopZZ категорий
+        ✓ Добавлено ${ozonCount} сопоставлений с Ozon
+        ✓ Добавлено ${wbCount} сопоставлений с WB
         ✓ Точных совпадений: ${result.stats.exactMatches}
         ✓ Средняя схожесть: ${result.stats.avgSimilarity}%`
 
@@ -402,6 +699,8 @@ export const useSessionStore = defineStore(
 					setTimeout(() => {
 						isLoading.value = false
 						worker.terminate()
+						// Обновляем визуальное представление категорий
+						updateCategoryVisualsBasedOnMappings()
 					}, 1000)
 				}
 			}
@@ -416,13 +715,19 @@ export const useSessionStore = defineStore(
 
 			// Создаем простые копии данных для передачи в Web Worker
 			// Это необходимо, так как некоторые объекты не могут быть клонированы
-			const serializableOzonCategories = unmappedOzonCategories.value.map(cat => ({
+			const serializableShopzzCategories = shopzzCategories.value.map(cat => ({
 				id: cat.id,
 				name: cat.name,
 				parent_id: cat.parent_id
 			}))
 			
-			const serializableWbCategories = unmappedWbCategories.value.map(cat => ({
+			const serializableOzonCategories = ozonCategories.value.map(cat => ({
+				id: cat.id,
+				name: cat.name,
+				parent_id: cat.parent_id
+			}))
+			
+			const serializableWbCategories = wbCategories.value.map(cat => ({
 				id: cat.id,
 				name: cat.name,
 				parent_id: cat.parent_id
@@ -432,6 +737,7 @@ export const useSessionStore = defineStore(
 			worker.postMessage({
 				action: 'autoMap',
 				data: {
+					shopzzCategories: serializableShopzzCategories,
 					ozonCategories: serializableOzonCategories,
 					wbCategories: serializableWbCategories,
 					threshold: threshold,
@@ -440,26 +746,39 @@ export const useSessionStore = defineStore(
 		}
 
 		return {
-			// State
-			unmappedOzonCategories,
-			unmappedWbCategories,
-			mappedCategories,
+			// State - Data stores for all three platforms
+			shopzzCategories,
+			ozonCategories,
+			wbCategories, 
+			categoryMappings, // New structure for mappings
 			isLoading,
 			loadingMessage,
 
-			// Computed
+			// Computed - Tree views for all three platforms
+			shopzzCategoryTree,
 			ozonCategoryTree,
 			wbCategoryTree,
 
-			// Actions
+			// Core category actions
 			initializeData,
-			mapCategories,
-			markCategoryAsNotSold,
-			removeMapping,
-			cancelMapping, // Новая функция отмены сопоставления
+			initializeMappings,
+			findShopzzMapping,
+			findCategoryById,
+			
+			// Mapping actions
+			mapCategory,            // Map external category to ShopZZ category
+			markCategoryAsNotSold, // Mark ShopZZ category as not sold
+			removeMapping,         // Remove specific external mapping 
+			cancelAllMappings,     // Cancel all mappings for a ShopZZ category
+			updateCategoryVisualsBasedOnMappings, // Обновление визуального представления
+			
+			// Session management
 			exportSession,
 			importSession,
 			resetSession,
+			
+			// Utilities
+			calculateStringSimilarity,
 			autoMapCategories,
 		}
 	},

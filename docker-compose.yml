@@ -7,14 +7,13 @@ services:
       dockerfile: Dockerfile
     container_name: category-mapper
     ports:
-      - "8080:80"
+      - '8081:80'
     restart: unless-stopped
     volumes:
       # Монтируем каталог с данными категорий
       - ./public/data:/usr/share/nginx/html/data:ro
     environment:
       - NODE_ENV=production
-
 # Для масштабирования в будущем можно добавить дополнительные сервисы:
 # Например, API сервер, базу данных, кэш и т.д.
 #

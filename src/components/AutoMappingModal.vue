@@ -73,13 +73,15 @@
       <div class="modal-footer">
         <button 
           class="cancel-btn" 
-          @click="$emit('update:modelValue', false)"
+          @click.prevent.stop="$emit('update:modelValue', false)"
+          type="button"
         >
           Отмена
         </button>
         <button 
           class="start-btn" 
-          @click="startAutoMapping"
+          @click.prevent.stop="startAutoMapping"
+          type="button"
         >
           Начать автоматическое сопоставление
         </button>
@@ -106,8 +108,18 @@ const emit = defineEmits(['update:modelValue', 'start-auto-mapping'])
 const threshold = ref(75) // Default 75% similarity
 
 // Methods
-const startAutoMapping = () => {
+const startAutoMapping = (event) => {
+  // Предотвращаем стандартное поведение и всплытие события
+  if (event) {
+    event.preventDefault()
+    event.stopPropagation()
+  }
+  
+  // Вызываем автосопоставление с выбранным порогом сходства
+  console.log('Starting auto-mapping with threshold:', threshold.value)
   emit('start-auto-mapping', threshold.value)
+  
+  // Закрываем модальное окно
   emit('update:modelValue', false)
 }
 </script>

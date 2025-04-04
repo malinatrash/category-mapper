@@ -1,6 +1,9 @@
 /**
  * Web Worker для выполнения автоматического сопоставления категорий
  * без блокировки основного потока UI
+ *
+ * Supports three-level mapping: ShopZZ -> Ozon, ShopZZ -> WB
+ * and OzonWB matches that help create mappings for both platforms
  */
 
 // Функция расчета сходства строк (Levenshtein distance)
@@ -50,13 +53,32 @@ function calculateStringSimilarity(str1, str2) {
   return 1.0 - (distance / maxLength)
 }
 
+/**
+ * Находит наиболее подходящую ShopZZ категорию по имени
+ */
+function findBestShopzzMatch(name, shopzzData, threshold) {
+  let bestMatch = null
+  let bestSimilarity = threshold
+  
+  for (const shopzz of shopzzData) {
+    const similarity = calculateStringSimilarity(name, shopzz.category.name)
+    
+    if (similarity > bestSimilarity) {
+      bestSimilarity = similarity
+      bestMatch = shopzz
+    }
+  }
+  
+  return bestMatch
+}
+
 // Обработчик сообщений от основного потока
 self.onmessage = function(e) {
   const { action, data } = e.data
   
   if (action === 'autoMap') {
     // Извлекаем данные из сообщения
-    const { ozonCategories, wbCategories, threshold } = data
+    const { shopzzCategories, ozonCategories, wbCategories, threshold } = data
     
     // Отправляем прогресс 
     self.postMessage({ 
@@ -65,8 +87,8 @@ self.onmessage = function(e) {
       message: 'Подготовка данных для автосопоставления...' 
     })
     
-    // Выполняем сопоставление в отдельном потоке
-    const result = performAutoMapping(ozonCategories, wbCategories, threshold)
+    // Выполняем сопоставление в отдельном потоке с учетом трехуровневой структуры
+    const result = performAutoMapping(shopzzCategories, ozonCategories, wbCategories, threshold)
     
     // Отправляем результат обратно в основной поток
     self.postMessage({ 
@@ -78,8 +100,9 @@ self.onmessage = function(e) {
 
 /**
  * Выполняет автоматическое сопоставление категорий
+ * Трехуровневая структура: ShopZZ -> Ozon, ShopZZ -> WB
  */
-function performAutoMapping(ozonCategories, wbCategories, threshold) {
+function performAutoMapping(shopzzCategories, ozonCategories, wbCategories, threshold) {
   const startTime = performance.now()
   
   // Статистика
@@ -108,32 +131,69 @@ function performAutoMapping(ozonCategories, wbCategories, threshold) {
     })
   })
   
-  // Результаты - пары для сопоставления
-  const matchingPairs = []
+  // Результаты - структура для сопоставления
+  // ShopZZ category может быть сопоставлена с несколькими Ozon и WB категориями
+  // Или только с категориями одной платформы
   
-  // Шаг 1: Точные совпадения
+  // Индексируем ShopZZ категории для быстрого поиска
+  const shopzzExactMatchIndex = {}
+  const shopzzNormalizedData = []
+  
+  shopzzCategories.forEach(cat => {
+    const normalizedName = cat.name.toLowerCase().trim()
+    shopzzExactMatchIndex[normalizedName] = cat
+    shopzzNormalizedData.push({
+      category: cat,
+      normalizedName
+    })
+  })
+  
+  // Шаг 1: Обработка точных совпадений для каждой платформы по отдельности
   let lastProgress = 0
   
+  // Эта структура хранит все найденные сопоставления по shopzzId
+  // { shopzzId: { category: shopzzCategory, ozon: [], wb: [] } }
+  const mappedByShopzzId = {}
+  
+  // Этап 1a: Обработка Ozon категорий
   for (let i = 0; i < ozonCategories.length; i++) {
     const ozonCategory = ozonCategories[i]
     
     // Пропускаем удаленные категории
     if (!ozonIdSet.has(ozonCategory.id)) continue
     
-    // Проверяем точное совпадение
+    // Нормализуем имя категории
     const normalizedName = ozonCategory.name.toLowerCase().trim()
-    const exactMatch = wbExactMatchIndex[normalizedName]
     
-    if (exactMatch && wbIdSet.has(exactMatch.id)) {
-      // Найдено точное совпадение
-      matchingPairs.push([ozonCategory, exactMatch])
-      stats.mapped++
-      stats.exactMatches++
-      stats.similaritySum += 1.0
+    // Поиск подходящей ShopZZ категории
+    const shopzzMatch = shopzzExactMatchIndex[normalizedName] || 
+                        findBestShopzzMatch(ozonCategory.name, shopzzNormalizedData, threshold)
+    
+    // Если нашли подходящую ShopZZ категорию
+    if (shopzzMatch) {
+      // Выбираем фактическую категорию (учитываем структуру объекта)
+      const shopzzCategory = shopzzMatch.category || shopzzMatch
+      const shopzzId = String(shopzzCategory.id)
       
-      // Удаляем обработанные категории
+      // Добавляем в структуру сопоставлений, если еще нет
+      if (!mappedByShopzzId[shopzzId]) {
+        mappedByShopzzId[shopzzId] = {
+          category: shopzzCategory,
+          ozon: [],
+          wb: []
+        }
+      }
+      
+      // Добавляем Ozon категорию в сопоставление
+      mappedByShopzzId[shopzzId].ozon.push(ozonCategory)
+      
+      // Удаляем из доступных, чтобы не использовать дважды
       ozonIdSet.delete(ozonCategory.id)
-      wbIdSet.delete(exactMatch.id)
+      
+      // Увеличиваем счетчик сопоставлений
+      stats.mapped++
+      stats.exactMatches++ // Условно считаем точным, даже если был использован findBestShopzzMatch
+      stats.similaritySum += 1.0
     }
     
     stats.processed++
@@ -151,15 +211,80 @@ function performAutoMapping(ozonCategories, wbCategories, threshold) {
     }
   }
   
+  // Этап 1b: Обработка WB категорий
   // Промежуточный отчет
   self.postMessage({
     type: 'progress',
-    status: 'step2',
-    message: `Поиск частичных совпадений для оставшихся ${ozonIdSet.size} категорий...`,
+    status: 'step1b',
+    message: `Обработка категорий Wildberries...`,
     stats: { ...stats, totalToProcess }
   })
   
-  // Шаг 2: Поиск приблизительных совпадений
+  // Обрабатываем WB категории аналогично Ozon
+  lastProgress = 0
+  
+  for (let i = 0; i < wbCategories.length; i++) {
+    const wbCategory = wbCategories[i]
+    
+    // Пропускаем удаленные категории
+    if (!wbIdSet.has(wbCategory.id)) continue
+    
+    // Нормализуем имя категории
+    const normalizedName = wbCategory.name.toLowerCase().trim()
+    
+    // Поиск подходящей ShopZZ категории
+    const shopzzMatch = shopzzExactMatchIndex[normalizedName] || 
+                       findBestShopzzMatch(wbCategory.name, shopzzNormalizedData, threshold)
+    
+    // Если нашли подходящую ShopZZ категорию
+    if (shopzzMatch) {
+      // Выбираем фактическую категорию (учитываем структуру объекта)
+      const shopzzCategory = shopzzMatch.category || shopzzMatch
+      const shopzzId = String(shopzzCategory.id)
+      
+      // Добавляем в структуру сопоставлений, если еще нет
+      if (!mappedByShopzzId[shopzzId]) {
+        mappedByShopzzId[shopzzId] = {
+          category: shopzzCategory,
+          ozon: [],
+          wb: []
+        }
+      }
+      
+      // Добавляем WB категорию в сопоставление
+      mappedByShopzzId[shopzzId].wb.push(wbCategory)
+      
+      // Удаляем из доступных, чтобы не использовать дважды
+      wbIdSet.delete(wbCategory.id)
+      
+      // Увеличиваем счетчик сопоставлений
+      stats.mapped++
+      stats.exactMatches++
+      stats.similaritySum += 1.0
+    }
+    
+    // Отправляем прогресс каждые 5%
+    const currentProgress = Math.floor((i / wbCategories.length) * 100)
+    if (currentProgress >= lastProgress + 5) {
+      self.postMessage({
+        type: 'progress',
+        status: 'processing',
+        message: `Обработка Wildberries категорий: ${i}/${wbCategories.length} (${currentProgress}%)`,
+        stats: { ...stats, totalToProcess }
+      })
+      lastProgress = currentProgress
+    }
+  }
+  
+  // Промежуточный отчет о завершении первого этапа
+  self.postMessage({
+    type: 'progress',
+    status: 'step2',
+    message: `Поиск парных сопоставлений Ozon-WB...`,
+    stats: { ...stats, totalToProcess }
+  })
+  
+  // Шаг 2: Поиск пар Ozon-WB для обогащения результатов маппинга
   const remainingOzons = ozonCategories.filter(c => ozonIdSet.has(c.id))
   lastProgress = 0
   
@@ -168,27 +293,59 @@ function performAutoMapping(ozonCategories, wbCategories, threshold) {
     
     if (!ozonIdSet.has(ozonCategory.id)) continue
     
-    let bestMatch = null
-    let bestSimilarity = threshold
+    let bestWbMatch = null
+    let bestWbSimilarity = threshold
     
+    // Ищем наиболее похожую WB категорию
     for (const wbData of wbNormalizedData) {
       if (!wbIdSet.has(wbData.category.id)) continue
       
       const similarity = calculateStringSimilarity(ozonCategory.name, wbData.category.name)
       
-      if (similarity > bestSimilarity) {
-        bestSimilarity = similarity
-        bestMatch = wbData.category
+      if (similarity > bestWbSimilarity) {
+        bestWbSimilarity = similarity
+        bestWbMatch = wbData.category
       }
     }
     
-    if (bestMatch) {
-      matchingPairs.push([ozonCategory, bestMatch])
-      stats.mapped++
-      stats.similaritySum += bestSimilarity
+    if (bestWbMatch) {
+      // Ищем подходящую ShopZZ категорию для этой пары
+      const shopzzMatch = findBestShopzzMatch(ozonCategory.name, shopzzNormalizedData, threshold)
       
-      ozonIdSet.delete(ozonCategory.id)
-      wbIdSet.delete(bestMatch.id)
+      if (shopzzMatch) {
+        // Выбираем фактическую категорию (учитываем структуру объекта)
+        const shopzzCategory = shopzzMatch.category || shopzzMatch
+        const shopzzId = String(shopzzCategory.id)
+        
+        // Добавляем в структуру сопоставлений, если еще нет
+        if (!mappedByShopzzId[shopzzId]) {
+          mappedByShopzzId[shopzzId] = {
+            category: shopzzCategory,
+            ozon: [],
+            wb: []
+          }
+        }
+        
+        // Добавляем обе категории в сопоставление, если их еще нет там
+        const addedOzon = !mappedByShopzzId[shopzzId].ozon.some(c => c.id === ozonCategory.id)
+        const addedWb = !mappedByShopzzId[shopzzId].wb.some(c => c.id === bestWbMatch.id)
+        
+        if (addedOzon) {
+          mappedByShopzzId[shopzzId].ozon.push(ozonCategory)
+          ozonIdSet.delete(ozonCategory.id)
+        }
+        
+        if (addedWb) {
+          mappedByShopzzId[shopzzId].wb.push(bestWbMatch)
+          wbIdSet.delete(bestWbMatch.id)
+        }
+        
+        // Увеличиваем счетчики статистики
+        if (addedOzon || addedWb) {
+          stats.mapped++
+          stats.similaritySum += bestWbSimilarity
+        }
+      }
     }
     
     // Отправляем прогресс для второго этапа
@@ -207,12 +364,29 @@ function performAutoMapping(ozonCategories, wbCategories, threshold) {
   
   const endTime = performance.now()
   
+  // Преобразуем результаты в формат для возврата
+  const finalMappingResults = [];
+  
+  // Превращаем объект в массив маппингов
+  Object.keys(mappedByShopzzId).forEach(shopzzId => {
+    const mapping = mappedByShopzzId[shopzzId];
+    finalMappingResults.push({
+      shopzz: mapping.category,
+      ozon: mapping.ozon,
+      wb: mapping.wb
+    });
+  });
+  
+  // Формируем итоговый результат
   return {
-    matchingPairs,
+    mappingResults: finalMappingResults,
     stats: {
       totalProcessed: totalToProcess,
       mapped: stats.mapped,
       exactMatches: stats.exactMatches,
+      totalShopzzMapped: finalMappingResults.length,
+      totalOzonMapped: finalMappingResults.reduce((sum, m) => sum + m.ozon.length, 0),
+      totalWbMapped: finalMappingResults.reduce((sum, m) => sum + m.wb.length, 0),
       similaritySum: stats.similaritySum,
       avgSimilarity: stats.mapped > 0 ? Math.round((stats.similaritySum / stats.mapped) * 100) : 0
     },

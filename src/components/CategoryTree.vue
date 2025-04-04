@@ -34,7 +34,7 @@ const props = defineProps({
   platformType: {
     type: String,
     required: true,
-    validator: (value) => ['ozon', 'wb'].includes(value)
+    validator: (value) => ['ozon', 'wb', 'shopzz'].includes(value)
   },
   searchQuery: {
     type: String,

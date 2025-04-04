@@ -5,7 +5,8 @@
       :class="{ 
         'selected': isSelected, 
         'highlight-match': matchesSearch,
-        'has-matching-child': hasMatchingChild
+        'has-matching-child': hasMatchingChild,
+        'mapped-category': isMapped
       }"
       @click="selectCategory"
     >
@@ -40,6 +41,10 @@
 
 <script setup>
 import { ref, computed, watch } from 'vue'
+import { useSessionStore } from '../stores/session'
+
+// Store
+const sessionStore = useSessionStore()
 
 // Props
 const props = defineProps({
@@ -50,7 +55,7 @@ const props = defineProps({
   platformType: {
     type: String,
     required: true,
-    validator: (value) => ['ozon', 'wb'].includes(value)
+    validator: (value) => ['ozon', 'wb', 'shopzz'].includes(value)
   },
   searchQuery: {
     type: String,
@@ -69,6 +74,16 @@ const emit = defineEmits(['select-category', 'remove-category', 'has-match'])
 const isExpanded = ref(false)
 const isSelected = ref(false)
 const hasMatchingChild = ref(false)
+
+// Проверяем, имеет ли категория сопоставления (только для ShopZZ)
+const isMapped = computed(() => {
+  if (props.platformType !== 'shopzz') return false
+  
+  const categoryId = String(props.category.id)
+  const mapping = sessionStore.categoryMappings.find(m => String(m.shopzz_id) === categoryId)
+  
+  return mapping && mapping.mappings && mapping.mappings.length > 0
+})
 
 // Вычисляем, соответствует ли текущая категория поисковому запросу
 const matchesSearch = computed(() => {
@@ -140,6 +155,10 @@ const childHasMatch = (hasMatch) => {
 </script>
 
 <style scoped>
+.mapped-category {
+  background-color: rgba(76, 175, 80, 0.1); /* Легкий зеленый фон */
+  border-left: 3px solid #4CAF50; /* Зеленая полоса слева */
+}
 .category-node {
   margin: 2px 0;
   list-style-type: none;

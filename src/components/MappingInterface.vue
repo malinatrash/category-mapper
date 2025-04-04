@@ -36,8 +36,10 @@
     </div>
     
     <div v-else class="mapping-container">
-      <div class="category-columns">
-        <div class="category-column">
+      <!-- Three-column layout with ShopZZ as the center/primary column -->
+      <div class="category-columns three-level">
+        <!-- Wildberries Column -->
+        <div class="category-column wb-column">
           <h3>Категории Wildberries</h3>
           <div class="search-container">
             <input 
@@ -53,39 +55,70 @@
             platformType="wb"
             :searchQuery="wbSearchQuery"
             @select-category="handleCategorySelect"
-            @remove-category="handleCategoryRemove"
           />
         </div>
         
-        <div class="mapping-controls">
-          <div 
-            class="selected-category wb-category"
-            v-if="selectedWbCategory"
-          >
-            <div>{{ selectedWbCategory.name }}</div>
-            <div class="category-id">ID: {{ selectedWbCategory.id }}</div>
+        <!-- ShopZZ Column (center, primary) -->
+        <div class="category-column shopzz-column primary-column">
+          <div class="column-header-with-stats">
+            <h3>Категории ShopZZ (основные)</h3>
+            <div class="category-stats">
+              <span class="unmapped-count">Не сопоставлено: {{ sessionStore.shopzzCategories.length }}</span>
+            </div>
           </div>
-          <div v-else class="placeholder">Select WB category</div>
-          
-          <button 
-            @click="mapSelectedCategories" 
-            class="map-btn"
-            :disabled="!canMap"
-          >
-            Map Categories
-          </button>
-          
-          <div 
-            class="selected-category ozon-category"
-            v-if="selectedOzonCategory"
-          >
-            <div>{{ selectedOzonCategory.name }}</div>
-            <div class="category-id">ID: {{ selectedOzonCategory.id }}</div>
+          <div class="search-container">
+            <input 
+              type="text" 
+              v-model="shopzzSearchQuery" 
+              placeholder="Поиск в категориях ShopZZ..."
+              class="search-input"
+            />
+            <span class="search-icon">🔍</span>
           </div>
-          <div v-else class="placeholder">Выберите категорию Ozon</div>
+          <category-tree 
+            :categories="filteredShopzzCategories" 
+            platformType="shopzz"
+            :searchQuery="shopzzSearchQuery"
+            @select-category="handleShopzzCategorySelect"
+          />
+          
+          <!-- Selected ShopZZ Category Info -->
+          <div v-if="selectedShopzzCategory" class="selected-shopzz-info">
+            <h4>Выбранная категория ShopZZ:</h4>
+            <div class="shopzz-category-details">
+              <div>{{ selectedShopzzCategory.name }}</div>
+              <div class="category-id">ID: {{ selectedShopzzCategory.id }}</div>
+              <div>
+                <button 
+                  @click="mapSelectedExternalCategory('wb')" 
+                  class="map-btn map-wb-btn"
+                  :disabled="!selectedWbCategory || !selectedShopzzCategory"
+                >
+                  Привязать WB категорию
+                </button>
+                <button 
+                  @click="mapSelectedExternalCategory('ozon')" 
+                  class="map-btn map-ozon-btn"
+                  :disabled="!selectedOzonCategory || !selectedShopzzCategory"
+                >
+                  Привязать Ozon категорию
+                </button>
+              </div>
+              <div>
+                <button 
+                  @click="markSelectedShopzzAsNotSold()" 
+                  class="not-sold-btn"
+                  :disabled="!selectedShopzzCategory"
+                >
+                  Отметить как "Не продается"
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
         
-        <div class="category-column">
+        <!-- Ozon Column -->
+        <div class="category-column ozon-column">
           <h3>Категории Ozon</h3>
           <div class="search-container">
             <input 
@@ -101,17 +134,35 @@
             platformType="ozon"
             :searchQuery="ozonSearchQuery"
             @select-category="handleCategorySelect"
-            @remove-category="handleCategoryRemove"
           />
         </div>
       </div>
       
+      <!-- Selected External Categories Display -->
+      <div class="selected-external-categories">
+        <div class="external-category wb" v-if="selectedWbCategory">
+          <h4>Выбранная WB категория:</h4>
+          <div>{{ selectedWbCategory.name }}</div>
+          <div class="category-id">ID: {{ selectedWbCategory.id }}</div>
+          <button @click="selectedWbCategory = null" class="clear-btn">✕</button>
+        </div>
+        
+        <div class="external-category ozon" v-if="selectedOzonCategory">
+          <h4>Выбранная Ozon категория:</h4>
+          <div>{{ selectedOzonCategory.name }}</div>
+          <div class="category-id">ID: {{ selectedOzonCategory.id }}</div>
+          <button @click="selectedOzonCategory = null" class="clear-btn">✕</button>
+        </div>
+      </div>
+      
+      <!-- Mapped Categories List -->
       <div class="mapped-categories-section">
-        <h3>Сопоставленные категории</h3>
+        <h3>Карта сопоставлений</h3>
         <mapped-categories-list 
-          :mappedCategories="sessionStore.mappedCategories"
-          @remove-mapping="sessionStore.removeMapping"
-          @cancel-mapping="sessionStore.cancelMapping"
+          ref="mappedCategoriesList"
+          :categoryMappings="sessionStore.categoryMappings"
+          @remove-mapping="handleRemoveMapping"
+          @cancel-all-mappings="handleCancelAllMappings"
         />
       </div>
     </div>
@@ -127,7 +178,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, nextTick } from 'vue'
 import { useSessionStore } from '../stores/session'
 import CategoryTree from './CategoryTree.vue'
 import MappedCategoriesList from './MappedCategoriesList.vue'
@@ -139,13 +190,12 @@ const sessionStore = useSessionStore()
 // State
 const selectedWbCategory = ref(null)
 const selectedOzonCategory = ref(null)
+const selectedShopzzCategory = ref(null)
 const fileInput = ref(null)
 const wbSearchQuery = ref('')
 const ozonSearchQuery = ref('')
+const shopzzSearchQuery = ref('')
 const showAutoMappingModal = ref(false)
-
-// Computed
-const canMap = computed(() => selectedWbCategory.value && selectedOzonCategory.value)
 
 // Progress tracking for auto-mapping
 const isAutoMappingInProgress = computed(() => {
@@ -218,6 +268,10 @@ const searchInCategoryTree = (categories, query) => {
     .filter(Boolean)
 }
 
+const filteredShopzzCategories = computed(() => {
+  return searchInCategoryTree(sessionStore.shopzzCategoryTree, shopzzSearchQuery.value)
+})
+
 const filteredWbCategories = computed(() => {
   return searchInCategoryTree(sessionStore.wbCategoryTree, wbSearchQuery.value)
 })
@@ -239,6 +293,103 @@ const handleCategorySelect = ({ category, platform }) => {
   } else if (platform === 'ozon') {
     selectedOzonCategory.value = category
   }
+}
+
+const handleShopzzCategorySelect = ({ category }) => {
+  selectedShopzzCategory.value = category
+}
+
+// Functions for managing mappings based on the ShopZZ hierarchy
+const mapSelectedExternalCategory = (platform) => {
+  if (!selectedShopzzCategory.value) return
+  
+  if (platform === 'wb' && selectedWbCategory.value) {
+    const success = sessionStore.mapCategory(
+      selectedShopzzCategory.value.id,
+      'wb',
+      selectedWbCategory.value
+    )
+    
+    if (success) {
+      // Clear selected WB category after successful mapping
+      selectedWbCategory.value = null
+    }
+  } else if (platform === 'ozon' && selectedOzonCategory.value) {
+    const success = sessionStore.mapCategory(
+      selectedShopzzCategory.value.id,
+      'ozon',
+      selectedOzonCategory.value
+    )
+    
+    if (success) {
+      // Clear selected Ozon category after successful mapping
+      selectedOzonCategory.value = null
+    }
+  }
+}
+
+const markSelectedShopzzAsNotSold = () => {
+  if (selectedShopzzCategory.value) {
+    sessionStore.markCategoryAsNotSold(selectedShopzzCategory.value.id)
+  }
+}
+
+const handleRemoveMapping = (shopzzId, platform, externalId) => {
+  // Вывод отладочной информации
+  console.log('Removing mapping:', { shopzzId, platform, externalId })
+  console.log('Types:', { 
+    shopzzIdType: typeof shopzzId, 
+    platformType: typeof platform, 
+    externalIdType: typeof externalId
+  })
+  
+  if (confirm('Вы уверены, что хотите удалить это сопоставление?')) {
+    try {
+      // Преобразуем все аргументы в строки для единообразия
+      const result = sessionStore.removeMapping(String(shopzzId), String(platform), String(externalId))
+      console.log('Mapping removal result:', result)
+      
+      // Явно запрашиваем обновление интерфейса
+      sessionStore.updateCategoryVisualsBasedOnMappings()
+      
+      // Отладка маппингов после удаления
+      const mapping = sessionStore.categoryMappings.find(m => String(m.shopzz_id) === String(shopzzId))
+      if (mapping) {
+        console.log('Current mappings for ShopZZ ID', shopzzId, ':', mapping.mappings)
+      }
+    } catch (error) {
+      console.error('Error removing mapping:', error)
+    }
+  }
+}
+
+const handleCancelAllMappings = (shopzzId) => {
+  // Вывод отладочной информации
+  console.log('Canceling all mappings for:', shopzzId, 'type:', typeof shopzzId)
+  
+  if (confirm('Вы уверены, что хотите отменить все сопоставления для этой категории ShopZZ?')) {
+    try {
+      // Преобразуем ID в строку для гарантии корректного сравнения
+      const result = sessionStore.cancelAllMappings(String(shopzzId))
+      console.log('Cancel all mappings result:', result)
+      
+      // Явно запрашиваем обновление интерфейса
+      sessionStore.updateCategoryVisualsBasedOnMappings()
+    } catch (error) {
+      console.error('Error canceling all mappings:', error)
+    }
+  }
+
+  // Явное обновление интерфейса
+  nextTick(() => {
+    console.log('Updated mappings count:', sessionStore.categoryMappings.length)
+    
+    // Проверяем, действительно ли удалены маппинги
+    const mapping = sessionStore.categoryMappings.find(m => String(m.shopzz_id) === String(shopzzId))
+    if (mapping) {
+      console.log('Current mappings for ShopZZ ID', shopzzId, ':', mapping.mappings || [])
+    }
+  })
 }
 
 // Translate loading messages
@@ -440,6 +591,27 @@ const handleAutoMapping = (threshold) => {
   margin-bottom: 10px;
   color: var(--accent-color);
   font-weight: 500;
+}
+
+.column-header-with-stats {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.category-stats {
+  font-size: 0.9rem;
+}
+
+.unmapped-count {
+  background-color: var(--light-green);
+  color: var(--accent-color);
+  padding: 3px 8px;
+  border-radius: 20px;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
 }
 
 .mapping-controls {
